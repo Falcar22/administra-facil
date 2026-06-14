@@ -1,0 +1,22 @@
+services:
+  # O Banco de Dados (Onde o Flutter vai salvar os produtos)
+  db:
+    image: postgres:15
+    container_name: pdv_db
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: sua_senha_segura
+      POSTGRES_DB: pdv_negocios
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./dados_banco:/var/lib/postgresql/data
+
+  # Interface para você ver as tabelas (localhost:8080)
+  adminer:
+    image: adminer
+    container_name: pdv_adminer
+    restart: always
+    ports:
+      - "8081:8080"
