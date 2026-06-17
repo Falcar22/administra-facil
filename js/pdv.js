@@ -1096,22 +1096,102 @@ async function renderizarPedidosDelivery() {
     }
 }
 // =================================================================
-// 🛵 INICIALIZAÇÃO AUTOMÁTICA DO MÓDULO DE DELIVERY (REALTIME)
+// 🛵 MÓDULO DE DELIVERY AUTOMATIZADO (SUPABASE REALTIME)
 // =================================================================
-document.addEventListener('DOMContentLoaded', () => {
+
+// 1. Função para buscar e renderizar os cards dos pedidos na tela
+async function renderizarPedidosDelivery() {
+    const listaContainer = document.getElementById('lista-pedidos-delivery');
+    if (!listaContainer) return;
+
+    try {
+        const { data: pedidos, error } = await window.supabaseClient
+            .from('vendas')
+            .select('*')
+            .eq('tipo_venda', 'Delivery')
+            .in('status_entrega', ['Pendente', 'Aguardando Despacho'])
+            .order('criado_em', { ascending: false });
+
+        if (error) throw error;
+
+        if (!pedidos || pedidos.length === 0) {
+            listaContainer.innerHTML = `
+                <div class="text-center py-8 text-gray-400">
+                    <p class="text-sm">Nenhum pedido de delivery pendente.</p>
+                </div>
+            `;
+            return;
+        }
+
+        listaContainer.innerHTML = pedidos.map(pedido => `
+            <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-3 flex justify-between items-center shadow-md">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-green-400 font-bold">#${pedido.id}</span>
+                        <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">${pedido.forma_pagamento || 'PIX'}</span>
+                    </div>
+                    <p class="text-white font-medium mt-1">Total: R$ ${parseFloat(pedido.valor_total || 0).toFixed(2)}</p>
+                    <p class="text-gray-400 text-xs mt-1"><span class="font-semibold">Destino:</span> ${pedido.endereco_destino || 'Não informado'}</p>
+                </div>
+                <div>
+                    <button class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-2 rounded transition-colors">
+                        Despachar
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        console.error("❌ Erro ao renderizar pedidos:", err.message);
+    }
+}
+
+// 2. Função para conectar o WebSocket ao Supabase Realtime
+function configurarMonitoramentoRealtime() {
+    console.log("📡 Monitoramento Realtime iniciado na tabela 'vendas'...");
+
+    if (!window.supabaseClient) {
+        console.error("❌ Cliente Supabase não encontrado em window.supabaseClient");
+        return;
+    }
+
+    window.supabaseClient
+        .channel('vendas-realtime')
+        .on(
+            'postgres_changes', 
+            { event: 'INSERT', schema: 'public', table: 'vendas' }, 
+            (payload) => {
+                console.log('🛍️ Novo pedido detectado em tempo real:', payload.new);
+                reproduzirAlertaSonoro();
+                renderizarPedidosDelivery();
+            }
+        )
+        .subscribe();
+}
+
+// 3. Função auxiliar do Beep Sonoro
+function reproduzirAlertaSonoro() {
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(587.33, audioContext.currentTime);
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.15);
+    } catch (e) {
+        console.error("Erro ao reproduzir som:", e);
+    }
+}
+
+// 4. Inicializador Isolado e Seguro (Garante a execução de tudo)
+setTimeout(() => {
     console.log("🚀 Inicializando escuta do módulo Delivery...");
+    alert("Módulo Delivery: Aguardando pedidos via API/WhatsApp"); // Seu alerta original de volta!
     
-    // 1. Busca os pedidos que já existem no banco para não abrir a tela vazia
-    if (typeof renderizarPedidosDelivery === 'function') {
-        renderizarPedidosDelivery(); 
-    } else {
-        console.warn("⚠️ Função renderizarPedidosDelivery não foi encontrada no escopo.");
-    }
-    
-    // 2. Liga as antenas do WebSocket para novos pedidos que entrarem
-    if (typeof configurarMonitoramentoRealtime === 'function') {
-        configurarMonitoramentoRealtime(); 
-    } else {
-        console.warn("⚠️ Função configurarMonitoramentoRealtime não foi encontrada no escopo.");
-    }
-});
+    renderizarPedidosDelivery();
+    configurarMonitoramentoRealtime();
+}, 1500); // Aguarda 1.5 segundos para garantir que o cliente do banco carregou 100%
