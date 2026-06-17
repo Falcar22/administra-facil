@@ -914,3 +914,204 @@ async function renderizarEntregadores() {
         container.innerHTML = `<div class="text-center text-xs text-red-400 py-4">Falha ao carregar dados.</div>`;
     }
 }
+// =======================================================
+// 23. MÓDULO DE GESTÃO DO DELIVERY
+// =======================================================
+
+function abrirModalDelivery() {
+    document.getElementById('modal-delivery').classList.remove('hidden');
+    renderizarPedidosDelivery();
+}
+
+function fecharModalDelivery() {
+    document.getElementById('modal-delivery').classList.add('hidden');
+}
+
+// Renderiza os pedidos que vieram integrados
+async function renderizarPedidosDelivery() {
+    const container = document.getElementById('lista-delivery-corpo');
+    const contador = document.getElementById('contador-delivery');
+    if (!container) return;
+
+    try {
+        // Busca as últimas vendas/pedidos marcados como Delivery que ainda não foram finalizados ou despachados
+        const { data: pedidos, error } = await _supabase
+            .from('vendas')
+            .select('*')
+            .eq('forma_pagamento', 'Delivery') // ou filtre pelo status que você preferir
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        if (error) throw error;
+
+        if (!pedidos || pedidos.length === 0) {
+            container.innerHTML = `<div class="text-center text-xs text-slate-600 py-8">Nenhum pedido pendente na fila do Delivery.</div>`;
+            if (contador) contador.innerText = "0 Pendentes";
+            return;
+        }
+
+        if (contador) contador.innerText = `${pedidos.length} Pendentes`;
+
+        container.innerHTML = pedidos.map(ped => {
+            const hora = ped.created_at ? new Date(ped.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--';
+            // Criamos um endereço padrão limpo caso não venha no banco da simulação
+            const enderecoCliente = ped.operador && ped.operador.includes(',') ? ped.operador : "Endereço Integrado via WhatsApp, 450";
+            const identificadorPedido = ped.id.slice(0, 5).toUpperCase();
+
+            return `
+                <div class="p-3 bg-slate-950/40 border border-slate-800 rounded-xl flex items-center justify-between gap-3 hover:border-slate-700/60 transition-all">
+                    <div class="space-y-0.5 max-w-[65%]">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[11px] font-bold text-green-400">Pedido #${identificadorPedido}</span>
+                            <span class="text-[10px] text-slate-500 font-mono">${hora}</span>
+                        </div>
+                        <p class="text-xs font-semibold text-slate-200">Total: R$ ${parseFloat(ped.total).toFixed(2)}</p>
+                        <p class="text-[11px] text-slate-400 truncate font-mono" title="${enderecoCliente}">📍 ${enderecoCliente}</p>
+                    </div>
+                    
+                    <button onclick="transferirParaDespacho('${identificadorPedido}', '${enderecoCliente}')" class="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] rounded-lg transition-all cursor-pointer whitespace-nowrap shadow-md">
+                        🚀 Despachar
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+    } catch (err) {
+        console.error("Erro ao renderizar delivery:", err.message);
+        container.innerHTML = `<div class="text-center text-xs text-red-400 py-4">Erro ao atualizar a fila do Delivery.</div>`;
+    }
+}
+
+// Atalho inteligente: Pega os dados do Delivery, fecha o painel atual e já abre o form de Despacho preenchido!
+function transferirParaDespacho(codigoPedido, endereco) {
+    fecharModalDelivery();
+    
+    // Abre a tela de despacho que estruturamos
+    document.getElementById('modal-despacho-entrega').classList.remove('hidden');
+    
+    // Preenche automaticamente os inputs para o operador economizar tempo digitando!
+    document.getElementById('despacho-pedido').value = codigoPedido;
+    document.getElementById('despacho-endereco').value = endereco;
+    
+    // Recarrega o select de motoboys ativos para garantir
+    abrirModalDespacho();
+}
+// Função para monitorar a tabela de vendas em tempo real
+function configurarMonitoramentoRealtime() {
+    console.log("📡 Monitoramento Realtime iniciado na tabela 'vendas'...");
+
+    _supabase
+        .channel('vendas-realtime') // Cria um canal de comunicação
+        .on(
+            'postgres_changes', 
+            { 
+                event: 'INSERT', // Queremos escutar apenas quando um NOVO pedido for inserido
+                schema: 'public', 
+                table: 'vendas' 
+            }, 
+            (payload) => {
+                console.log('🛍️ Novo pedido detectado em tempo real:', payload.new);
+                
+                // Aqui a mágica acontece:
+                // 1. Dispara um alerta sonoro discreto (opcional, ótimo para o operador)
+                reproduzirAlertaSonoro();
+
+                // 2. Atualiza a listagem de pedidos do seu modal de delivery automaticamente
+                if (typeof renderizarPedidosDelivery === 'function') {
+                    renderizarPedidosDelivery(); 
+                }
+            }
+        )
+        .subscribe();
+}
+
+// Função auxiliar para dar aquele toque profissional de sistema de delivery tradicional
+function reproduzirAlertaSonoro() {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(587.33, audioContext.currentTime); // Nota Ré (D5)
+    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.15); // Beep rápido de 150ms
+}
+// Função para buscar e exibir os pedidos de delivery pendentes
+async function renderizarPedidosDelivery() {
+    const listaContainer = document.getElementById('lista-pedidos-delivery');
+    if (!listaContainer) return;
+
+    try {
+        // Busca as vendas pendentes de entrega no Supabase
+        const { data: pedidos, error } = await _supabase
+            .from('vendas')
+            .select('*')
+            .eq('tipo_venda', 'Delivery') // Filtra apenas o que for entrega
+            .in('status_entrega', ['Pendente', 'Aguardando Despacho']) 
+            .order('criado_em', { ascending: false });
+
+        if (error) throw error;
+
+        // Se não houver pedidos, mostra uma mensagem amigável
+        if (!pedidos || pedidos.length === 0) {
+            listaContainer.innerHTML = `
+                <div class="text-center py-8 text-gray-400">
+                    <p>Nenhum pedido de delivery pendente no momento.</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Monta os cards usando Tailwind CSS
+        listaContainer.innerHTML = pedidos.map(pedido => {
+            return `
+                <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-3 flex justify-between items-center shadow-md">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-green-400 font-bold">#${pedido.id}</span>
+                            <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">${pedido.forma_pagamento}</span>
+                        </div>
+                        <p class="text-white font-medium mt-1">Total: R$ ${pedido.valor_total.toFixed(2)}</p>
+                        <p class="text-gray-400 text-xs mt-1"><span class="font-semibold">Destino:</span> ${pedido.endereco_destino || 'Não informado'}</p>
+                    </div>
+                    <div>
+                        <button 
+                            onclick="abrirModalDespacho('${pedido.id}', '${pedido.endereco_destino}')"
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-2 rounded transition-colors"
+                        >
+                            Despachar
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (err) {
+        console.error("Erro ao renderizar pedidos do delivery:", err.message);
+    }
+}
+// =================================================================
+// 🛵 INICIALIZAÇÃO AUTOMÁTICA DO MÓDULO DE DELIVERY (REALTIME)
+// =================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("🚀 Inicializando escuta do módulo Delivery...");
+    
+    // 1. Busca os pedidos que já existem no banco para não abrir a tela vazia
+    if (typeof renderizarPedidosDelivery === 'function') {
+        renderizarPedidosDelivery(); 
+    } else {
+        console.warn("⚠️ Função renderizarPedidosDelivery não foi encontrada no escopo.");
+    }
+    
+    // 2. Liga as antenas do WebSocket para novos pedidos que entrarem
+    if (typeof configurarMonitoramentoRealtime === 'function') {
+        configurarMonitoramentoRealtime(); 
+    } else {
+        console.warn("⚠️ Função configurarMonitoramentoRealtime não foi encontrada no escopo.");
+    }
+});
